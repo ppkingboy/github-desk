@@ -153,7 +153,7 @@ enum RepositoryStatus {
     var title: String {
         switch self {
         case .localOnly: return "仅本地"
-        case .unmatchedRemote: return "远程未匹配"
+        case .unmatchedRemote: return "远程不可用"
         case .needsSync: return "待同步"
         case .synced: return "已同步"
         }

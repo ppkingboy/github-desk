@@ -107,6 +107,13 @@ enum GitService {
         )
     }
 
+    static func disconnectRemote(repository: LocalRepository) throws {
+        let workingDirectory = URL(fileURLWithPath: repository.path)
+        let remote = try runRawGit(["remote", "get-url", "origin"], workingDirectory: workingDirectory)
+        guard remote.succeeded else { return }
+        try runGit(["remote", "remove", "origin"], workingDirectory: workingDirectory)
+    }
+
     static func commitAndPush(
         repository: LocalRepository,
         message: String,

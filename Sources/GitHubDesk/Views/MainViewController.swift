@@ -698,8 +698,10 @@ final class MainViewController: NSViewController {
             ))
         case .unmatchedRemote:
             views.append(ActionButton(
-                title: "检查",
-                handler: { [weak self] in self?.store.reveal(repository) }
+                title: "重新发布",
+                systemImage: "arrow.clockwise",
+                isPrimary: true,
+                handler: { [weak self] in self?.presentPublish(repository) }
             ))
         case .needsSync:
             if repository.behind > 0 {
@@ -767,6 +769,13 @@ final class MainViewController: NSViewController {
         if repository.isDirty && repository.remote != nil {
             menu.addItem(ActionMenuItem(title: "提交并推送", systemImage: "arrow.up.circle") { [weak self] in
                 self?.presentCommit(repository)
+            })
+        }
+
+        if repository.remote == nil && repository.remoteSlug != nil {
+            menu.addItem(.separator())
+            menu.addItem(ActionMenuItem(title: "断开远程连接", systemImage: "link.badge.minus") { [weak self] in
+                self?.confirmDisconnectRemote(repository)
             })
         }
 
@@ -954,6 +963,18 @@ final class MainViewController: NSViewController {
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         store.confirmVisibilityChange(VisibilityChange(repository: repository, visibility: visibility))
+    }
+
+    private func confirmDisconnectRemote(_ repository: LocalRepository) {
+        let alert = NSAlert()
+        alert.messageText = "断开远程连接？"
+        alert.informativeText = "只会删除这个本地仓库的 origin 配置，不会删除本地提交，也不会影响 GitHub 上其他仓库。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "断开")
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() == .alertFirstButtonReturn {
+            store.disconnectRemote(repository)
+        }
     }
 
     private func presentAccountManager() {

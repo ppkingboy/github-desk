@@ -364,6 +364,18 @@ final class AppStore: ObservableObject {
         )
     }
 
+    func disconnectRemote(_ repository: LocalRepository) {
+        perform(
+            repositoryID: repository.id,
+            success: "已断开 \(repository.name) 的远程连接",
+            operation: {
+                try await Task.detached(priority: .userInitiated) {
+                    try GitService.disconnectRemote(repository: repository)
+                }.value
+            }
+        )
+    }
+
     func confirmVisibilityChange(_ change: VisibilityChange) {
         guard let account = accountCandidate(for: change.repository) else {
             promptForAccount()
