@@ -174,7 +174,8 @@ final class AppStore: ObservableObject {
                 let credential = AccountCredential(
                     accessToken: accessToken,
                     refreshToken: token.refreshToken,
-                    expiresAt: token.expiresIn.map { Date().addingTimeInterval(TimeInterval($0)) }
+                    expiresAt: token.expiresIn.map { Date().addingTimeInterval(TimeInterval($0)) },
+                    scope: token.scope
                 )
                 try KeychainStore.save(credential, accountID: account.id)
 
@@ -289,6 +290,10 @@ final class AppStore: ObservableObject {
                 }.value
 
                 let credential = try await self.validCredential(for: account)
+                try self.requireWorkflowScopeIfNeeded(
+                    repository: request.repository,
+                    credential: credential
+                )
                 let repository = try await GitHubAPIClient(accessToken: credential.accessToken)
                     .createRepository(
                         name: sanitizedName,
@@ -318,6 +323,10 @@ final class AppStore: ObservableObject {
             success: "已提交并推送 \(request.repository.name)",
             operation: {
                 let credential = try await self.validCredential(for: account)
+                try self.requireWorkflowScopeIfNeeded(
+                    repository: request.repository,
+                    credential: credential
+                )
                 try await Task.detached(priority: .userInitiated) {
                     try GitService.commitAndPush(
                         repository: request.repository,
@@ -357,6 +366,10 @@ final class AppStore: ObservableObject {
             success: "已推送 \(repository.name)",
             operation: {
                 let credential = try await self.validCredential(for: account)
+                try self.requireWorkflowScopeIfNeeded(
+                    repository: repository,
+                    credential: credential
+                )
                 try await Task.detached(priority: .userInitiated) {
                     try GitService.push(repository: repository, credential: credential)
                 }.value
@@ -469,6 +482,10 @@ final class AppStore: ObservableObject {
                         }.value
                         succeeded.append("\(repository.name)：已拉取")
                     } else if repository.ahead > 0 {
+                        try self.requireWorkflowScopeIfNeeded(
+                            repository: repository,
+                            credential: credential
+                        )
                         try await Task.detached(priority: .userInitiated) {
                             try GitService.push(repository: repository, credential: credential)
                         }.value
@@ -561,10 +578,22 @@ final class AppStore: ObservableObject {
         let updated = AccountCredential(
             accessToken: accessToken,
             refreshToken: refreshed.refreshToken ?? refreshToken,
-            expiresAt: refreshed.expiresIn.map { Date().addingTimeInterval(TimeInterval($0)) }
+            expiresAt: refreshed.expiresIn.map { Date().addingTimeInterval(TimeInterval($0)) },
+            scope: refreshed.scope ?? credential.scope
         )
         try KeychainStore.save(updated, accountID: account.id)
         return updated
+    }
+
+    private func requireWorkflowScopeIfNeeded(
+        repository: LocalRepository,
+        credential: AccountCredential
+    ) throws {
+        guard repository.hasWorkflowFiles,
+              !credential.scopes.contains("workflow") else {
+            return
+        }
+        throw GitHubOAuthError.missingScope("workflow")
     }
 
     private func perform(

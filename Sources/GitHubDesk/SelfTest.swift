@@ -11,6 +11,7 @@ enum SelfTest {
             ("parse HTTPS remote", GitRemoteParser.slug(from: "https://github.com/ppkingboy/webportspagehub.git") == "ppkingboy/webportspagehub"),
             ("reject GitLab remote", GitRemoteParser.slug(from: "git@gitlab.com:owner/repository.git") == nil),
             ("configure OAuth client", !OAuthConfiguration.clientID.isEmpty),
+            ("request workflow scope", OAuthConfiguration.scope.contains("workflow")),
             ("detect secret", secretFindings),
             ("bootstrap project", projectBootstrap)
         ]

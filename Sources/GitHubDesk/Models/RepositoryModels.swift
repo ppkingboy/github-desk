@@ -81,6 +81,25 @@ struct AccountCredential: Codable {
     let accessToken: String
     let refreshToken: String?
     let expiresAt: Date?
+    let scope: String?
+
+    init(
+        accessToken: String,
+        refreshToken: String?,
+        expiresAt: Date?,
+        scope: String? = nil
+    ) {
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.expiresAt = expiresAt
+        self.scope = scope
+    }
+
+    var scopes: Set<String> {
+        Set((scope ?? "").split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        })
+    }
 }
 
 struct DeviceCodeResponse: Codable {
@@ -139,8 +158,17 @@ struct LocalRepository: Identifiable, Hashable {
     var status: RepositoryStatus {
         guard remoteSlug != nil else { return .localOnly }
         guard remote != nil else { return .unmatchedRemote }
+        guard hasUpstream else { return .needsSync }
         if isDirty || ahead > 0 || behind > 0 { return .needsSync }
         return .synced
+    }
+
+    var hasWorkflowFiles: Bool {
+        FileManager.default.fileExists(
+            atPath: URL(fileURLWithPath: path, isDirectory: true)
+                .appendingPathComponent(".github/workflows")
+                .path
+        )
     }
 }
 

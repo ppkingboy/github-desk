@@ -2,13 +2,14 @@ import Foundation
 
 enum OAuthConfiguration {
     static let clientID = "Ov23lizZW41iBf7A2ky5"
-    static let scope = "repo read:org"
+    static let scope = "repo read:org workflow"
 }
 
 enum GitHubOAuthError: LocalizedError {
     case invalidResponse(String)
     case authorizationDenied
     case expired
+    case missingScope(String)
     case network(String)
 
     var errorDescription: String? {
@@ -19,6 +20,8 @@ enum GitHubOAuthError: LocalizedError {
             return "GitHub 授权被拒绝。"
         case .expired:
             return "设备验证码已过期，请重新登录。"
+        case .missingScope(let scope):
+            return "当前 GitHub 登录缺少 \(scope) 权限。请在账号管理中重新添加同一账号并完成授权。"
         case .network(let message):
             return "GitHub 登录失败：\(message)"
         }
