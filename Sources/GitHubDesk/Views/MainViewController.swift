@@ -9,7 +9,16 @@ final class MainViewController: NSViewController {
     private let pathLabel = makeLabel("", font: .monospacedSystemFont(ofSize: 11, weight: .regular), color: .secondaryLabelColor)
     private let noticeLabel = makeLabel("", font: .systemFont(ofSize: 11, weight: .semibold), color: AppTheme.accent)
     private let refreshButton = ActionButton(handler: {})
+    private let newProjectButton = ActionButton(handler: {})
+    private let syncAllButton = ActionButton(handler: {})
+    private let selectButton = ActionButton(handler: {})
     private let accountButton = NSPopUpButton()
+    private let operationIndicator = NSProgressIndicator()
+    private let operationLabel = makeLabel(
+        "",
+        font: .systemFont(ofSize: 11, weight: .medium),
+        color: .secondaryLabelColor
+    )
     private var cancellables = Set<AnyCancellable>()
     private var lastPresentedAlertID: UUID?
     private var toastWorkItem: DispatchWorkItem?
@@ -62,6 +71,7 @@ final class MainViewController: NSViewController {
         bindStore()
         sidebar.update(store: store)
         render()
+        updateOperationUI()
     }
 
     private func buildTopBar() -> NSView {
@@ -74,12 +84,11 @@ final class MainViewController: NSViewController {
         pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let selectButton = ActionButton(
-            title: "选择目录",
-            systemImage: "folder",
-            handler: { [weak self] in self?.store.chooseWorkspace() }
-        )
+        selectButton.title = "选择目录"
+        selectButton.image = NSImage(systemSymbolName: "folder", accessibilityDescription: "选择目录")
+        selectButton.imagePosition = .imageLeading
         selectButton.controlSize = .small
+        selectButton.handler = { [weak self] in self?.store.chooseWorkspace() }
 
         refreshButton.title = "刷新"
         refreshButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "刷新")
@@ -94,25 +103,30 @@ final class MainViewController: NSViewController {
         accountButton.translatesAutoresizingMaskIntoConstraints = false
         accountButton.widthAnchor.constraint(equalToConstant: 150).isActive = true
 
-        let newProjectButton = ActionButton(
-            title: "新建项目",
-            systemImage: "plus.square",
-            handler: { [weak self] in self?.presentNewProject() }
-        )
+        newProjectButton.title = "新建项目"
+        newProjectButton.image = NSImage(systemSymbolName: "plus.square", accessibilityDescription: "新建项目")
+        newProjectButton.imagePosition = .imageLeading
         newProjectButton.controlSize = .small
+        newProjectButton.handler = { [weak self] in self?.presentNewProject() }
 
-        let syncAllButton = ActionButton(
-            title: "批量同步",
-            systemImage: "arrow.triangle.2.circlepath",
-            handler: { [weak self] in self?.store.batchSync() }
-        )
+        syncAllButton.title = "批量同步"
+        syncAllButton.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: "批量同步")
+        syncAllButton.imagePosition = .imageLeading
         syncAllButton.controlSize = .small
+        syncAllButton.handler = { [weak self] in self?.store.batchSync() }
 
         noticeLabel.isHidden = true
+        operationLabel.isHidden = true
+        operationIndicator.style = .bar
+        operationIndicator.controlSize = .small
+        operationIndicator.isHidden = true
+        operationIndicator.translatesAutoresizingMaskIntoConstraints = false
+        operationIndicator.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        operationLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 210).isActive = true
 
         let bar = makeStack(
             [
-                searchField, pathLabel, noticeLabel, makeSpacer(),
+                searchField, pathLabel, noticeLabel, operationIndicator, operationLabel, makeSpacer(),
                 newProjectButton, syncAllButton, accountButton, selectButton, refreshButton
             ],
             orientation: .horizontal,
@@ -213,15 +227,27 @@ final class MainViewController: NSViewController {
 
         store.$isRefreshing
             .receive(on: RunLoop.main)
-            .sink { [weak self] isRefreshing in
-                self?.refreshButton.isEnabled = !isRefreshing
-                self?.refreshButton.title = isRefreshing ? "刷新中" : "刷新"
+            .sink { [weak self] _ in
+                self?.updateOperationUI()
             }
             .store(in: &cancellables)
 
         store.$busyRepositoryID
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.render() }
+            .sink { [weak self] _ in
+                self?.updateOperationUI()
+                self?.render()
+            }
+            .store(in: &cancellables)
+
+        store.$operationMessage
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updateOperationUI() }
+            .store(in: &cancellables)
+
+        store.$operationProgress
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updateOperationUI() }
             .store(in: &cancellables)
 
         store.$alert
@@ -314,6 +340,43 @@ final class MainViewController: NSViewController {
         } else {
             accountButton.title = "登录"
             accountButton.image = NSImage(systemSymbolName: "person.crop.circle.badge.plus", accessibilityDescription: "登录")
+        }
+    }
+
+    private func updateOperationUI() {
+        let active = store.isBusy || store.isRefreshing
+        newProjectButton.isEnabled = !active
+        syncAllButton.isEnabled = !active
+        selectButton.isEnabled = !active
+        refreshButton.isEnabled = !active
+        accountButton.isEnabled = !active
+        refreshButton.title = store.isRefreshing ? "刷新中" : "刷新"
+        searchField.isHidden = active
+        pathLabel.isHidden = active
+        newProjectButton.isHidden = active
+        syncAllButton.isHidden = active
+        selectButton.isHidden = active
+
+        operationIndicator.isHidden = !active
+        operationLabel.isHidden = !active
+
+        guard active else {
+            operationIndicator.stopAnimation(nil)
+            operationLabel.stringValue = ""
+            return
+        }
+
+        let message = store.operationMessage
+            ?? (store.isRefreshing ? "正在刷新本地与 GitHub 仓库" : "正在处理")
+        operationLabel.stringValue = message
+        operationIndicator.stopAnimation(nil)
+
+        if let progress = store.operationProgress {
+            operationIndicator.isIndeterminate = false
+            operationIndicator.doubleValue = max(0, min(100, progress * 100))
+        } else {
+            operationIndicator.isIndeterminate = true
+            operationIndicator.startAnimation(nil)
         }
     }
 
@@ -741,7 +804,11 @@ final class MainViewController: NSViewController {
         }
         views.append(menuButton)
 
-        return makeStack(views, orientation: .horizontal, spacing: 8, alignment: .centerY)
+        let stack = makeStack(views, orientation: .horizontal, spacing: 8, alignment: .centerY)
+        if store.isBusy {
+            stack.arrangedSubviews.compactMap { $0 as? NSControl }.forEach { $0.isEnabled = false }
+        }
+        return stack
     }
 
     private func showLocalMenu(for repository: LocalRepository, relativeTo button: NSButton) {
@@ -848,6 +915,8 @@ final class MainViewController: NSViewController {
         )
         open.toolTip = "在 GitHub 中打开"
         let actions = makeStack([clone, open], orientation: .horizontal, spacing: 8, alignment: .centerY)
+        clone.isEnabled = !store.isBusy
+        open.isEnabled = !store.isBusy
 
         let row = makeStack([icon, text, makeSpacer(), actions], orientation: .horizontal, spacing: 14, alignment: .top)
         let card = CardView()

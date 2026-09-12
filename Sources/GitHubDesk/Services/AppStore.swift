@@ -28,6 +28,8 @@ final class AppStore: ObservableObject {
     @Published var remoteRepositories: [GitHubRepository] = []
     @Published var isRefreshing = false
     @Published var busyRepositoryID: String?
+    @Published var operationMessage: String?
+    @Published var operationProgress: Double?
     @Published var alert: AppAlert?
     @Published var toastMessage: String?
     @Published var publishTarget: LocalRepository?
@@ -55,6 +57,10 @@ final class AppStore: ObservableObject {
     var currentAccount: GitHubAccount? {
         guard let currentAccountID else { return accounts.first }
         return accounts.first { $0.id == currentAccountID } ?? accounts.first
+    }
+
+    var isBusy: Bool {
+        busyRepositoryID != nil
     }
 
     var filteredLocalRepositories: [LocalRepository] {
@@ -98,6 +104,7 @@ final class AppStore: ObservableObject {
     func refresh() {
         guard !isRefreshing else { return }
         isRefreshing = true
+        operationMessage = "正在刷新本地与 GitHub 仓库"
         let root = URL(fileURLWithPath: workspaceRootPath, isDirectory: true)
         let account = currentAccount
 
@@ -126,6 +133,7 @@ final class AppStore: ObservableObject {
             }
 
             isRefreshing = false
+            operationMessage = nil
         }
     }
 
@@ -266,6 +274,7 @@ final class AppStore: ObservableObject {
         perform(
             repositoryID: repository.idString,
             success: "已克隆 \(repository.nameWithOwner)",
+            progress: "正在克隆 \(repository.nameWithOwner)",
             operation: {
                 let credential = try await self.validCredential(for: account)
                 try await Task.detached(priority: .userInitiated) {
@@ -284,6 +293,7 @@ final class AppStore: ObservableObject {
         perform(
             repositoryID: request.repository.id,
             success: "已发布 \(request.repository.name)",
+            progress: "正在发布 \(request.repository.name)",
             operation: {
                 try await Task.detached(priority: .userInitiated) {
                     try GitService.prepareForPublish(request.repository, account: account)
@@ -321,6 +331,7 @@ final class AppStore: ObservableObject {
         perform(
             repositoryID: request.repository.id,
             success: "已提交并推送 \(request.repository.name)",
+            progress: "正在提交并推送 \(request.repository.name)",
             operation: {
                 let credential = try await self.validCredential(for: account)
                 try self.requireWorkflowScopeIfNeeded(
@@ -347,6 +358,7 @@ final class AppStore: ObservableObject {
         perform(
             repositoryID: repository.id,
             success: "已拉取 \(repository.name)",
+            progress: "正在拉取 \(repository.name)",
             operation: {
                 let credential = try await self.validCredential(for: account)
                 try await Task.detached(priority: .userInitiated) {
@@ -364,6 +376,7 @@ final class AppStore: ObservableObject {
         perform(
             repositoryID: repository.id,
             success: "已推送 \(repository.name)",
+            progress: "正在推送 \(repository.name)",
             operation: {
                 let credential = try await self.validCredential(for: account)
                 try self.requireWorkflowScopeIfNeeded(
@@ -381,6 +394,7 @@ final class AppStore: ObservableObject {
         perform(
             repositoryID: repository.id,
             success: "已断开 \(repository.name) 的远程连接",
+            progress: "正在断开 \(repository.name) 的远程连接",
             operation: {
                 try await Task.detached(priority: .userInitiated) {
                     try GitService.disconnectRemote(repository: repository)
@@ -399,6 +413,7 @@ final class AppStore: ObservableObject {
         perform(
             repositoryID: change.repository.id,
             success: "已将 \(change.repository.name) 设为\(change.visibility.title)",
+            progress: "正在更新 \(change.repository.name) 的可见性",
             operation: {
                 let credential = try await self.validCredential(for: account)
                 try await GitHubAPIClient(accessToken: credential.accessToken)
@@ -419,6 +434,7 @@ final class AppStore: ObservableObject {
         perform(
             repositoryID: repository.id,
             success: "已补齐 \(repository.name) 的基础文件",
+            progress: "正在补齐 \(repository.name) 的基础文件",
             operation: {
                 let changes = try await Task.detached(priority: .userInitiated) {
                     try GitService.standardize(
@@ -459,11 +475,16 @@ final class AppStore: ObservableObject {
         busyRepositoryID = "batch"
 
         Task {
+            operationMessage = "正在准备批量同步"
+            operationProgress = 0
             var succeeded: [String] = []
             var skipped: [String] = []
             var failed: [String] = []
 
-            for repository in localRepositories where repository.remote != nil {
+            let candidates = localRepositories.filter { $0.remote != nil }
+            for (index, repository) in candidates.enumerated() {
+                operationMessage = "正在同步 \(index + 1)/\(candidates.count)：\(repository.name)"
+                operationProgress = candidates.isEmpty ? 1 : Double(index) / Double(candidates.count)
                 if repository.isDirty || (repository.ahead > 0 && repository.behind > 0) {
                     skipped.append("\(repository.name)：存在未提交修改或分叉")
                     continue
@@ -498,7 +519,10 @@ final class AppStore: ObservableObject {
                 }
             }
 
+            operationProgress = 1
             busyRepositoryID = nil
+            operationMessage = nil
+            operationProgress = nil
             batchSyncReport = BatchSyncReport(
                 succeeded: succeeded,
                 skipped: skipped,
@@ -519,6 +543,7 @@ final class AppStore: ObservableObject {
         perform(
             repositoryID: "new-project",
             success: "已创建并发布 \(sanitizedName)",
+            progress: "正在创建并发布 \(sanitizedName)",
             operation: {
                 let localRepository = try await Task.detached(priority: .userInitiated) {
                     try GitService.initializeProject(
@@ -599,10 +624,13 @@ final class AppStore: ObservableObject {
     private func perform(
         repositoryID: String,
         success: String,
+        progress: String,
         operation: @escaping () async throws -> Void
     ) {
         guard busyRepositoryID == nil else { return }
         busyRepositoryID = repositoryID
+        operationMessage = progress
+        operationProgress = nil
 
         Task {
             do {
@@ -614,6 +642,8 @@ final class AppStore: ObservableObject {
             }
 
             busyRepositoryID = nil
+            operationMessage = nil
+            operationProgress = nil
         }
     }
 
