@@ -92,6 +92,7 @@ enum GitService {
     }
 
     static func pull(repository: LocalRepository, credential: AccountCredential) throws {
+        try ensureOrigin(for: repository)
         try runGit(
             ["pull", "--rebase=false"],
             workingDirectory: URL(fileURLWithPath: repository.path),
@@ -100,6 +101,7 @@ enum GitService {
     }
 
     static func push(repository: LocalRepository, credential: AccountCredential) throws {
+        try ensureOrigin(for: repository)
         try runGit(
             ["push"],
             workingDirectory: URL(fileURLWithPath: repository.path),
@@ -131,6 +133,7 @@ enum GitService {
         }
 
         let workingDirectory = URL(fileURLWithPath: repository.path)
+        try ensureOrigin(for: repository)
         try ensureGitIdentity(workingDirectory: workingDirectory, account: account)
         try runGit(["add", "-A"], workingDirectory: workingDirectory)
         try runGit(["commit", "-m", cleanMessage], workingDirectory: workingDirectory)
@@ -444,6 +447,30 @@ enum GitService {
                 workingDirectory: workingDirectory
             )
         }
+    }
+
+    @discardableResult
+    private static func ensureOrigin(for repository: LocalRepository) throws -> String {
+        let workingDirectory = URL(fileURLWithPath: repository.path)
+        let current = try runRawGit(
+            ["remote", "get-url", "origin"],
+            workingDirectory: workingDirectory
+        )
+        if current.succeeded {
+            return current.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        guard let remote = repository.remote else {
+            throw GitServiceError.commandFailed(
+                "本地仓库没有 origin，且 GitHub 远程仓库不可用。请使用“重新发布”，或在菜单中选择“断开远程连接”。"
+            )
+        }
+
+        try runGit(
+            ["remote", "add", "origin", remote.cloneURL],
+            workingDirectory: workingDirectory
+        )
+        return remote.cloneURL
     }
 
     private static func gitEnvironment(credential: AccountCredential) throws -> [String: String] {
