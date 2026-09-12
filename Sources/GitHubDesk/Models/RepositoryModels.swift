@@ -1,31 +1,122 @@
 import Foundation
 
 struct GitHubRepository: Codable, Identifiable, Hashable {
-    let nameWithOwner: String
+    let id: Int
+    let fullName: String
+    let name: String
     let description: String?
     let isPrivate: Bool
-    let visibility: String
-    let url: String
+    let htmlURL: String
     let sshUrl: String?
+    let cloneURL: String
     let updatedAt: String?
-    let defaultBranchRef: BranchReference?
-    let primaryLanguage: Language?
+    let defaultBranch: String?
+    let language: String?
+    let topics: [String]
 
-    var id: String { nameWithOwner }
-    var slug: String { nameWithOwner.lowercased() }
-    var name: String { nameWithOwner.split(separator: "/").last.map(String.init) ?? nameWithOwner }
-    var owner: String { nameWithOwner.split(separator: "/").first.map(String.init) ?? "" }
+    enum CodingKeys: String, CodingKey {
+        case id
+        case fullName = "full_name"
+        case name
+        case description
+        case isPrivate = "private"
+        case htmlURL = "html_url"
+        case sshUrl = "ssh_url"
+        case cloneURL = "clone_url"
+        case updatedAt = "updated_at"
+        case defaultBranch = "default_branch"
+        case language
+        case topics
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        fullName = try container.decode(String.self, forKey: .fullName)
+        name = try container.decode(String.self, forKey: .name)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        isPrivate = try container.decode(Bool.self, forKey: .isPrivate)
+        htmlURL = try container.decode(String.self, forKey: .htmlURL)
+        sshUrl = try container.decodeIfPresent(String.self, forKey: .sshUrl)
+        cloneURL = try container.decode(String.self, forKey: .cloneURL)
+        updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
+        defaultBranch = try container.decodeIfPresent(String.self, forKey: .defaultBranch)
+        language = try container.decodeIfPresent(String.self, forKey: .language)
+        topics = try container.decodeIfPresent([String].self, forKey: .topics) ?? []
+    }
+
+    var idString: String { String(id) }
+    var nameWithOwner: String { fullName }
+    var slug: String { fullName.lowercased() }
+    var owner: String { fullName.split(separator: "/").first.map(String.init) ?? "" }
     var isPublic: Bool { !isPrivate }
-    var defaultBranch: String { defaultBranchRef?.name ?? "main" }
+    var branchName: String { defaultBranch ?? "main" }
+    var htmlUrl: String { htmlURL }
+    var primaryLanguage: String? { language }
     var shortUpdatedAt: String { updatedAt.map { String($0.prefix(10)) } ?? "未知" }
 }
 
-struct BranchReference: Codable, Hashable {
-    let name: String
+struct GitHubAccount: Codable, Identifiable, Hashable {
+    let id: Int
+    let name: String?
+    let login: String
+    let avatarURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case login
+        case avatarURL = "avatar_url"
+    }
+
+    var displayName: String {
+        guard let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return login
+        }
+        return name
+    }
 }
 
-struct Language: Codable, Hashable {
-    let name: String
+struct AccountCredential: Codable {
+    let accessToken: String
+    let refreshToken: String?
+    let expiresAt: Date?
+}
+
+struct DeviceCodeResponse: Codable {
+    let deviceCode: String
+    let userCode: String
+    let verificationURI: String
+    let expiresIn: Int
+    let interval: Int
+
+    enum CodingKeys: String, CodingKey {
+        case deviceCode = "device_code"
+        case userCode = "user_code"
+        case verificationURI = "verification_uri"
+        case expiresIn = "expires_in"
+        case interval
+    }
+}
+
+struct OAuthTokenResponse: Codable {
+    let accessToken: String?
+    let refreshToken: String?
+    let expiresIn: Int?
+    let tokenType: String?
+    let scope: String?
+    let error: String?
+    let errorDescription: String?
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case refreshToken = "refresh_token"
+        case expiresIn = "expires_in"
+        case tokenType = "token_type"
+        case scope
+        case error
+        case errorDescription = "error_description"
+    }
 }
 
 struct LocalRepository: Identifiable, Hashable {

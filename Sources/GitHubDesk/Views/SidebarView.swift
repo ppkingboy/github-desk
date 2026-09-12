@@ -2,17 +2,19 @@ import AppKit
 
 final class SidebarView: NSVisualEffectView {
     var onSelect: ((WorkspaceSection) -> Void)?
+    var onAccount: (() -> Void)?
 
     private let overviewButton = ActionButton(handler: {})
     private let localButton = ActionButton(handler: {})
     private let remoteButton = ActionButton(handler: {})
     private let accountDot = NSView()
-    private let accountLabel = makeLabel("正在检查 GitHub", font: .systemFont(ofSize: 12, weight: .semibold))
+    private let accountLabel = makeLabel("尚未登录", font: .systemFont(ofSize: 12, weight: .semibold))
     private let accountDetail = makeLabel(
-        "通过 GitHub CLI 安全连接",
+        "添加或切换 GitHub 账号",
         font: .systemFont(ofSize: 10),
         color: .secondaryLabelColor
     )
+    private let accountButton = ActionButton(title: "账号管理", systemImage: "person.crop.circle", handler: {})
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -36,8 +38,14 @@ final class SidebarView: NSVisualEffectView {
         updateButton(localButton, selected: selected == .local)
         updateButton(remoteButton, selected: selected == .remote)
 
-        accountLabel.stringValue = store.login.isEmpty ? "正在检查 GitHub" : store.login
-        accountDot.layer?.backgroundColor = (store.login.isEmpty ? AppTheme.warning : AppTheme.accent).cgColor
+        if let account = store.currentAccount {
+            accountLabel.stringValue = "\(account.displayName) · @\(account.login)"
+            accountDetail.stringValue = "当前 GitHub 账号"
+        } else {
+            accountLabel.stringValue = "尚未登录"
+            accountDetail.stringValue = "添加或切换 GitHub 账号"
+        }
+        accountDot.layer?.backgroundColor = (store.currentAccount == nil ? AppTheme.warning : AppTheme.accent).cgColor
     }
 
     private func buildView() {
@@ -97,11 +105,13 @@ final class SidebarView: NSVisualEffectView {
             spacing: 1
         )
         let account = makeStack(
-            [accountDot, accountText],
+            [accountDot, accountText, makeSpacer(), accountButton],
             orientation: .horizontal,
             spacing: 9,
             alignment: .centerY
         )
+        accountButton.controlSize = .small
+        accountButton.handler = { [weak self] in self?.onAccount?() }
 
         let divider = makeDivider()
         let content = makeStack(
@@ -120,6 +130,7 @@ final class SidebarView: NSVisualEffectView {
             overviewButton.widthAnchor.constraint(equalTo: content.widthAnchor),
             localButton.widthAnchor.constraint(equalTo: content.widthAnchor),
             remoteButton.widthAnchor.constraint(equalTo: content.widthAnchor),
+            account.widthAnchor.constraint(equalTo: content.widthAnchor),
             divider.widthAnchor.constraint(equalTo: content.widthAnchor)
         ])
     }

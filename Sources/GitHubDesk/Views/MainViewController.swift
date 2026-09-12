@@ -9,6 +9,7 @@ final class MainViewController: NSViewController {
     private let pathLabel = makeLabel("", font: .monospacedSystemFont(ofSize: 11, weight: .regular), color: .secondaryLabelColor)
     private let noticeLabel = makeLabel("", font: .systemFont(ofSize: 11, weight: .semibold), color: AppTheme.accent)
     private let refreshButton = ActionButton(handler: {})
+    private let accountButton = ActionButton(handler: {})
     private var cancellables = Set<AnyCancellable>()
     private var lastPresentedAlertID: UUID?
     private var toastWorkItem: DispatchWorkItem?
@@ -30,6 +31,9 @@ final class MainViewController: NSViewController {
         sidebar.translatesAutoresizingMaskIntoConstraints = false
         sidebar.onSelect = { [weak self] section in
             self?.store.section = section
+        }
+        sidebar.onAccount = { [weak self] in
+            self?.presentAccountManager()
         }
 
         let topBar = buildTopBar()
@@ -86,10 +90,30 @@ final class MainViewController: NSViewController {
         refreshButton.controlSize = .small
         refreshButton.handler = { [weak self] in self?.store.refresh() }
 
+        accountButton.controlSize = .small
+        accountButton.handler = { [weak self] in self?.presentAccountManager() }
+
+        let newProjectButton = ActionButton(
+            title: "新建项目",
+            systemImage: "plus.square",
+            handler: { [weak self] in self?.presentNewProject() }
+        )
+        newProjectButton.controlSize = .small
+
+        let syncAllButton = ActionButton(
+            title: "批量同步",
+            systemImage: "arrow.triangle.2.circlepath",
+            handler: { [weak self] in self?.store.batchSync() }
+        )
+        syncAllButton.controlSize = .small
+
         noticeLabel.isHidden = true
 
         let bar = makeStack(
-            [searchField, pathLabel, noticeLabel, makeSpacer(), selectButton, refreshButton],
+            [
+                searchField, pathLabel, noticeLabel, makeSpacer(),
+                newProjectButton, syncAllButton, accountButton, selectButton, refreshButton
+            ],
             orientation: .horizontal,
             spacing: 10,
             alignment: .centerY
@@ -150,12 +174,23 @@ final class MainViewController: NSViewController {
             }
             .store(in: &cancellables)
 
-        store.$login
+        store.$accounts
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
                 self.sidebar.update(store: self.store)
                 self.pathLabel.stringValue = "工作区：\(self.store.workspaceRootPath)"
+                self.updateAccountButton()
+            }
+            .store(in: &cancellables)
+
+        store.$currentAccountID
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.sidebar.update(store: self.store)
+                self.updateAccountButton()
+                self.render()
             }
             .store(in: &cancellables)
 
@@ -197,11 +232,37 @@ final class MainViewController: NSViewController {
                 self?.showNotice(message)
             }
             .store(in: &cancellables)
+
+        store.$loginPresentation
+            .compactMap { $0 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] presentation in
+                self?.presentLogin(presentation)
+            }
+            .store(in: &cancellables)
+
+        store.$batchSyncReport
+            .compactMap { $0 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] report in
+                self?.presentBatchSyncReport(report)
+            }
+            .store(in: &cancellables)
     }
 
     @objc private func searchChanged(_ sender: NSSearchField) {
         store.searchText = sender.stringValue
         render()
+    }
+
+    private func updateAccountButton() {
+        if let account = store.currentAccount {
+            accountButton.title = "@\(account.login)"
+            accountButton.image = NSImage(systemSymbolName: "person.crop.circle", accessibilityDescription: "账号")
+        } else {
+            accountButton.title = "登录"
+            accountButton.image = NSImage(systemSymbolName: "person.crop.circle.badge.plus", accessibilityDescription: "登录")
+        }
     }
 
     private func render() {
@@ -211,6 +272,7 @@ final class MainViewController: NSViewController {
         }
 
         pathLabel.stringValue = "工作区：\(store.workspaceRootPath)"
+        updateAccountButton()
 
         switch store.section ?? .overview {
         case .overview:
@@ -519,7 +581,7 @@ final class MainViewController: NSViewController {
             color: .secondaryLabelColor
         )
         let metadata = makeLabel(
-            "\(repository.branch)  ·  \(repository.syncSummary)  ·  \(repository.shortLastCommitDate)",
+            "\(repository.branch)  ·  \(repository.syncSummary)  ·  健康 \(repository.health.score)%  ·  \(repository.shortLastCommitDate)",
             font: .systemFont(ofSize: 11),
             color: .secondaryLabelColor
         )
@@ -656,6 +718,11 @@ final class MainViewController: NSViewController {
             })
         }
 
+        menu.addItem(.separator())
+        menu.addItem(ActionMenuItem(title: "补齐仓库基础文件", systemImage: "checklist") { [weak self] in
+            self?.presentStandardize(repository)
+        })
+
         if let remote = repository.remote {
             menu.addItem(.separator())
             menu.addItem(ActionMenuItem(
@@ -691,7 +758,7 @@ final class MainViewController: NSViewController {
             maximumLines: 2
         )
         let metadata = makeLabel(
-            "\(repository.primaryLanguage?.name ?? "未知语言")  ·  更新于 \(repository.shortUpdatedAt)",
+            "\(repository.primaryLanguage ?? "未知语言")  ·  更新于 \(repository.shortUpdatedAt)",
             font: .systemFont(ofSize: 11),
             color: .secondaryLabelColor
         )
@@ -708,7 +775,11 @@ final class MainViewController: NSViewController {
             title: "克隆",
             systemImage: "arrow.down.to.line",
             isPrimary: true,
-            handler: { [weak self] in self?.store.clone(repository) }
+            handler: { [weak self] in
+                self?.chooseAccount(title: "选择克隆使用的账号") { account in
+                    self?.store.clone(repository, account: account)
+                }
+            }
         )
         let open = ActionButton(
             systemImage: "safari",
@@ -729,18 +800,13 @@ final class MainViewController: NSViewController {
             text.widthAnchor.constraint(greaterThanOrEqualToConstant: 440)
         ])
 
-        if store.busyRepositoryID == repository.id {
+        if store.busyRepositoryID == repository.idString {
             card.alphaValue = 0.72
         }
         return card
     }
 
     private func presentPublish(_ repository: LocalRepository) {
-        guard !store.login.isEmpty else {
-            presentError(AppAlert(title: "GitHub 未连接", message: "请先确认 GitHub CLI 已完成登录。"))
-            return
-        }
-
         let alert = NSAlert()
         alert.messageText = "发布到 GitHub"
         alert.informativeText = repository.hasCommits
@@ -786,12 +852,17 @@ final class MainViewController: NSViewController {
             return
         }
 
-        store.publish(PublishRequest(
-            repository: repository,
-            name: name,
-            description: descriptionField.stringValue,
-            visibility: visibilityPopup.indexOfSelectedItem == 0 ? .publicRepository : .privateRepository
-        ))
+        chooseAccount(title: "选择发布使用的账号") { [weak self] account in
+            self?.store.publish(
+                PublishRequest(
+                    repository: repository,
+                    name: name,
+                    description: descriptionField.stringValue,
+                    visibility: visibilityPopup.indexOfSelectedItem == 0 ? .publicRepository : .privateRepository
+                ),
+                account: account
+            )
+        }
     }
 
     private func presentCommit(_ repository: LocalRepository) {
@@ -831,6 +902,210 @@ final class MainViewController: NSViewController {
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         store.confirmVisibilityChange(VisibilityChange(repository: repository, visibility: visibility))
+    }
+
+    private func presentAccountManager() {
+        let alert = NSAlert()
+        alert.messageText = "GitHub 账号管理"
+        alert.informativeText = store.currentAccount.map {
+            "当前账号：\($0.displayName) · @\($0.login)"
+        } ?? "尚未添加 GitHub 账号。"
+
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 26))
+        popup.addItems(withTitles: store.accounts.map { "\($0.displayName) · @\($0.login)" })
+        if let currentAccountID = store.currentAccountID,
+           let index = store.accounts.firstIndex(where: { $0.id == currentAccountID }) {
+            popup.selectItem(at: index)
+        }
+        alert.accessoryView = popup
+
+        alert.addButton(withTitle: "添加账号")
+        if !store.accounts.isEmpty {
+            alert.addButton(withTitle: "切换")
+            alert.addButton(withTitle: "移除")
+        }
+        alert.addButton(withTitle: "关闭")
+
+        let response = alert.runModal()
+        let baseIndex = NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+
+        if response.rawValue == baseIndex {
+            store.beginLogin()
+            return
+        }
+
+        if !store.accounts.isEmpty {
+            if response.rawValue == baseIndex + 1 {
+                let index = max(0, popup.indexOfSelectedItem)
+                guard store.accounts.indices.contains(index) else { return }
+                store.switchAccount(to: store.accounts[index])
+                return
+            }
+
+            if response.rawValue == baseIndex + 2 {
+                let index = max(0, popup.indexOfSelectedItem)
+                guard store.accounts.indices.contains(index) else { return }
+                confirmRemoveAccount(store.accounts[index])
+            }
+        }
+    }
+
+    private func confirmRemoveAccount(_ account: GitHubAccount) {
+        let alert = NSAlert()
+        alert.messageText = "移除 GitHub 账号？"
+        alert.informativeText = "将删除 \(account.login) 保存在这台 Mac Keychain 中的令牌，不影响 GitHub 账号或远程仓库。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "移除")
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() == .alertFirstButtonReturn {
+            store.removeAccount(account)
+        }
+    }
+
+    private func presentLogin(_ presentation: LoginPresentation) {
+        let alert = NSAlert()
+        alert.messageText = "在浏览器中完成 GitHub 登录"
+        alert.informativeText = "浏览器已打开。\n\n验证码：\(presentation.userCode)\n\n输入验证码并确认授权后，应用会自动完成登录。"
+        alert.addButton(withTitle: "复制验证码")
+        alert.addButton(withTitle: "取消登录")
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(presentation.userCode, forType: .string)
+            showNotice("验证码已复制")
+        } else {
+            store.cancelLogin()
+        }
+    }
+
+    private func presentNewProject() {
+        chooseAccount(title: "选择新项目使用的账号") { [weak self] account in
+            guard let self else { return }
+
+            let alert = NSAlert()
+            alert.messageText = "新建并发布项目"
+            alert.informativeText = "项目会创建在 \(self.store.workspaceRootPath)"
+            alert.addButton(withTitle: "创建项目")
+            alert.addButton(withTitle: "取消")
+
+            let nameField = NSTextField(string: "")
+            nameField.placeholderString = "项目名称"
+            let descriptionField = NSTextField(string: "")
+            descriptionField.placeholderString = "项目说明"
+            let visibilityPopup = NSPopUpButton()
+            visibilityPopup.addItems(withTitles: ["公开", "私有"])
+            visibilityPopup.selectItem(at: 0)
+
+            let form = makeStack([
+                makeLabel("项目名称", font: .systemFont(ofSize: 11, weight: .medium)),
+                nameField,
+                makeLabel("项目说明", font: .systemFont(ofSize: 11, weight: .medium)),
+                descriptionField,
+                makeLabel("可见性", font: .systemFont(ofSize: 11, weight: .medium)),
+                visibilityPopup
+            ], orientation: .vertical, spacing: 5)
+            nameField.widthAnchor.constraint(equalToConstant: 390).isActive = true
+            descriptionField.widthAnchor.constraint(equalToConstant: 390).isActive = true
+            visibilityPopup.widthAnchor.constraint(equalToConstant: 390).isActive = true
+
+            let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 410, height: 178))
+            form.translatesAutoresizingMaskIntoConstraints = false
+            accessory.addSubview(form)
+            NSLayoutConstraint.activate([
+                form.leadingAnchor.constraint(equalTo: accessory.leadingAnchor, constant: 10),
+                form.trailingAnchor.constraint(equalTo: accessory.trailingAnchor, constant: -10),
+                form.topAnchor.constraint(equalTo: accessory.topAnchor, constant: 6),
+                form.bottomAnchor.constraint(lessThanOrEqualTo: accessory.bottomAnchor, constant: -6)
+            ])
+            alert.accessoryView = accessory
+
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            let projectName = RepositoryName.sanitize(nameField.stringValue)
+            guard projectName != "repository" else {
+                self.presentError(AppAlert(title: "项目名称无效", message: "请输入至少一个字母或数字。"))
+                return
+            }
+
+            self.store.createProject(
+                name: projectName,
+                description: descriptionField.stringValue,
+                visibility: visibilityPopup.indexOfSelectedItem == 0 ? .publicRepository : .privateRepository,
+                account: account
+            )
+        }
+    }
+
+    private func presentStandardize(_ repository: LocalRepository) {
+        chooseAccount(title: "选择仓库体检使用的账号") { [weak self] _ in
+            guard let self else { return }
+
+            let alert = NSAlert()
+            alert.messageText = "补齐仓库基础文件"
+            alert.informativeText = "将检查并补充 README、.gitignore、基础 CI；可选择同时添加 MIT License。不会自动提交。"
+            alert.addButton(withTitle: "开始补齐")
+            alert.addButton(withTitle: "取消")
+
+            let licenseCheckbox = NSButton(checkboxWithTitle: "添加 MIT License", target: nil, action: nil)
+            licenseCheckbox.state = .off
+            alert.accessoryView = licenseCheckbox
+
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            self.store.standardize(repository, includeMITLicense: licenseCheckbox.state == .on)
+        }
+    }
+
+    private func chooseAccount(
+        title: String,
+        completion: @escaping (GitHubAccount) -> Void
+    ) {
+        if store.accounts.isEmpty {
+            store.beginLogin()
+            return
+        }
+
+        if store.accounts.count == 1, let account = store.accounts.first {
+            completion(account)
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = "选择一个 GitHub 账号执行本次操作。"
+        alert.addButton(withTitle: "继续")
+        alert.addButton(withTitle: "取消")
+
+        let popup = NSPopUpButton()
+        popup.addItems(withTitles: store.accounts.map { "\($0.displayName) · @\($0.login)" })
+        if let currentAccountID = store.currentAccountID,
+           let index = store.accounts.firstIndex(where: { $0.id == currentAccountID }) {
+            popup.selectItem(at: index)
+        }
+        popup.frame = NSRect(x: 0, y: 0, width: 320, height: 26)
+        alert.accessoryView = popup
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let index = max(0, popup.indexOfSelectedItem)
+        guard store.accounts.indices.contains(index) else { return }
+        completion(store.accounts[index])
+    }
+
+    private func presentBatchSyncReport(_ report: BatchSyncReport) {
+        let alert = NSAlert()
+        alert.messageText = "批量同步完成"
+        alert.informativeText = [
+            "成功 \(report.succeeded.count)",
+            "跳过 \(report.skipped.count)",
+            "失败 \(report.failed.count)",
+            ([report.succeeded, report.skipped, report.failed]
+                .flatMap { $0 }
+                .prefix(10)
+                .joined(separator: "\n"))
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: "\n\n")
+        alert.addButton(withTitle: "关闭")
+        alert.runModal()
+        store.batchSyncReport = nil
     }
 
     private func presentError(_ alertData: AppAlert) {

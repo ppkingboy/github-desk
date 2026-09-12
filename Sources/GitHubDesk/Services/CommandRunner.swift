@@ -23,7 +23,7 @@ enum CommandRunnerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .executableNotFound(let executable):
-            return "找不到命令 \(executable)，请确认已安装 Git 和 GitHub CLI。"
+            return "找不到命令 \(executable)，请确认 macOS Git 工具可用。"
         case .launchFailed(let message):
             return "命令启动失败：\(message)"
         }
@@ -44,7 +44,8 @@ enum CommandRunner {
     static func run(
         executable: String,
         arguments: [String],
-        workingDirectory: URL? = nil
+        workingDirectory: URL? = nil,
+        environment: [String: String] = [:]
     ) throws -> CommandResult {
         guard FileManager.default.isExecutableFile(atPath: executable) else {
             throw CommandRunnerError.executableNotFound(executable)
@@ -67,6 +68,12 @@ enum CommandRunner {
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.currentDirectoryURL = workingDirectory
+        if !environment.isEmpty {
+            process.environment = ProcessInfo.processInfo.environment.merging(
+                environment,
+                uniquingKeysWith: { _, new in new }
+            )
+        }
         process.standardOutput = outputHandle
         process.standardError = errorHandle
         process.standardInput = FileHandle.nullDevice
@@ -98,11 +105,17 @@ enum CommandRunner {
     static func run(
         named executableName: String,
         arguments: [String],
-        workingDirectory: URL? = nil
+        workingDirectory: URL? = nil,
+        environment: [String: String] = [:]
     ) throws -> CommandResult {
         guard let executable = executable(named: executableName) else {
             throw CommandRunnerError.executableNotFound(executableName)
         }
-        return try run(executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+        return try run(
+            executable: executable,
+            arguments: arguments,
+            workingDirectory: workingDirectory,
+            environment: environment
+        )
     }
 }
