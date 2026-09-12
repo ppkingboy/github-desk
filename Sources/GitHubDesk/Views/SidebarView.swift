@@ -2,19 +2,10 @@ import AppKit
 
 final class SidebarView: NSVisualEffectView {
     var onSelect: ((WorkspaceSection) -> Void)?
-    var onAccount: (() -> Void)?
 
     private let overviewButton = ActionButton(handler: {})
     private let localButton = ActionButton(handler: {})
     private let remoteButton = ActionButton(handler: {})
-    private let accountDot = NSView()
-    private let accountLabel = makeLabel("尚未登录", font: .systemFont(ofSize: 12, weight: .semibold))
-    private let accountDetail = makeLabel(
-        "添加或切换 GitHub 账号",
-        font: .systemFont(ofSize: 10),
-        color: .secondaryLabelColor
-    )
-    private let accountButton = ActionButton(title: "账号管理", systemImage: "person.crop.circle", handler: {})
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -38,14 +29,6 @@ final class SidebarView: NSVisualEffectView {
         updateButton(localButton, selected: selected == .local)
         updateButton(remoteButton, selected: selected == .remote)
 
-        if let account = store.currentAccount {
-            accountLabel.stringValue = "\(account.displayName) · @\(account.login)"
-            accountDetail.stringValue = "当前 GitHub 账号"
-        } else {
-            accountLabel.stringValue = "尚未登录"
-            accountDetail.stringValue = "添加或切换 GitHub 账号"
-        }
-        accountDot.layer?.backgroundColor = (store.currentAccount == nil ? AppTheme.warning : AppTheme.accent).cgColor
     }
 
     private func buildView() {
@@ -93,29 +76,8 @@ final class SidebarView: NSVisualEffectView {
             spacing: 6
         )
 
-        accountDot.translatesAutoresizingMaskIntoConstraints = false
-        accountDot.wantsLayer = true
-        accountDot.layer?.cornerRadius = 4
-        accountDot.widthAnchor.constraint(equalToConstant: 8).isActive = true
-        accountDot.heightAnchor.constraint(equalToConstant: 8).isActive = true
-
-        let accountText = makeStack(
-            [accountLabel, accountDetail],
-            orientation: .vertical,
-            spacing: 1
-        )
-        let account = makeStack(
-            [accountDot, accountText, makeSpacer(), accountButton],
-            orientation: .horizontal,
-            spacing: 9,
-            alignment: .centerY
-        )
-        accountButton.controlSize = .small
-        accountButton.handler = { [weak self] in self?.onAccount?() }
-
-        let divider = makeDivider()
         let content = makeStack(
-            [brand, navigation, makeSpacer(), divider, account],
+            [brand, navigation, makeSpacer()],
             orientation: .vertical,
             spacing: 18
         )
@@ -129,9 +91,7 @@ final class SidebarView: NSVisualEffectView {
             content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
             overviewButton.widthAnchor.constraint(equalTo: content.widthAnchor),
             localButton.widthAnchor.constraint(equalTo: content.widthAnchor),
-            remoteButton.widthAnchor.constraint(equalTo: content.widthAnchor),
-            account.widthAnchor.constraint(equalTo: content.widthAnchor),
-            divider.widthAnchor.constraint(equalTo: content.widthAnchor)
+            remoteButton.widthAnchor.constraint(equalTo: content.widthAnchor)
         ])
     }
 

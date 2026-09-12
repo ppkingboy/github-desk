@@ -9,7 +9,7 @@ final class MainViewController: NSViewController {
     private let pathLabel = makeLabel("", font: .monospacedSystemFont(ofSize: 11, weight: .regular), color: .secondaryLabelColor)
     private let noticeLabel = makeLabel("", font: .systemFont(ofSize: 11, weight: .semibold), color: AppTheme.accent)
     private let refreshButton = ActionButton(handler: {})
-    private let accountButton = ActionButton(handler: {})
+    private let accountButton = NSPopUpButton()
     private var cancellables = Set<AnyCancellable>()
     private var lastPresentedAlertID: UUID?
     private var toastWorkItem: DispatchWorkItem?
@@ -31,9 +31,6 @@ final class MainViewController: NSViewController {
         sidebar.translatesAutoresizingMaskIntoConstraints = false
         sidebar.onSelect = { [weak self] section in
             self?.store.section = section
-        }
-        sidebar.onAccount = { [weak self] in
-            self?.presentAccountManager()
         }
 
         let topBar = buildTopBar()
@@ -91,7 +88,11 @@ final class MainViewController: NSViewController {
         refreshButton.handler = { [weak self] in self?.store.refresh() }
 
         accountButton.controlSize = .small
-        accountButton.handler = { [weak self] in self?.presentAccountManager() }
+        accountButton.bezelStyle = .rounded
+        accountButton.target = self
+        accountButton.action = #selector(accountSelectionChanged(_:))
+        accountButton.translatesAutoresizingMaskIntoConstraints = false
+        accountButton.widthAnchor.constraint(equalToConstant: 150).isActive = true
 
         let newProjectButton = ActionButton(
             title: "新建项目",
@@ -132,15 +133,24 @@ final class MainViewController: NSViewController {
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
         contentStack.spacing = 18
-        contentStack.edgeInsets = NSEdgeInsets(top: 18, left: 24, bottom: 28, right: 24)
         contentStack.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = contentStack
+
+        let documentView = FlippedView()
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        documentView.addSubview(contentStack)
+        scrollView.documentView = documentView
 
         NSLayoutConstraint.activate([
-            contentStack.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
-            contentStack.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
-            contentStack.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-            contentStack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor)
+            documentView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            documentView.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            documentView.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            documentView.heightAnchor.constraint(greaterThanOrEqualTo: scrollView.contentView.heightAnchor),
+
+            contentStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 24),
+            contentStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -24),
+            contentStack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 18),
+            contentStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -28)
         ])
 
         return scrollView
@@ -255,7 +265,49 @@ final class MainViewController: NSViewController {
         render()
     }
 
+    @objc private func accountSelectionChanged(_ sender: NSPopUpButton) {
+        guard let representedObject = sender.selectedItem?.representedObject as? Int else { return }
+
+        switch representedObject {
+        case -1:
+            store.beginLogin()
+        case -2:
+            presentAccountManager()
+        default:
+            guard let account = store.accounts.first(where: { $0.id == representedObject }) else { return }
+            store.switchAccount(to: account)
+        }
+    }
+
     private func updateAccountButton() {
+        let menu = NSMenu()
+
+        if store.accounts.isEmpty {
+            let loginItem = NSMenuItem(title: "登录 GitHub…", action: nil, keyEquivalent: "")
+            loginItem.representedObject = -1
+            menu.addItem(loginItem)
+        } else {
+            for account in store.accounts {
+                let item = NSMenuItem(
+                    title: "\(account.displayName) · @\(account.login)",
+                    action: nil,
+                    keyEquivalent: ""
+                )
+                item.representedObject = account.id
+                item.state = account.id == store.currentAccountID ? .on : .off
+                menu.addItem(item)
+            }
+
+            menu.addItem(.separator())
+            let addItem = NSMenuItem(title: "添加账号…", action: nil, keyEquivalent: "")
+            addItem.representedObject = -1
+            menu.addItem(addItem)
+            let manageItem = NSMenuItem(title: "账号管理…", action: nil, keyEquivalent: "")
+            manageItem.representedObject = -2
+            menu.addItem(manageItem)
+        }
+
+        accountButton.menu = menu
         if let account = store.currentAccount {
             accountButton.title = "@\(account.login)"
             accountButton.image = NSImage(systemSymbolName: "person.crop.circle", accessibilityDescription: "账号")
@@ -409,7 +461,7 @@ final class MainViewController: NSViewController {
 
     private func addFullWidth(_ subview: NSView) {
         contentStack.addArrangedSubview(subview)
-        subview.widthAnchor.constraint(equalTo: contentStack.widthAnchor, constant: -48).isActive = true
+        subview.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
     }
 
     private func makePageHeader(title: String, subtitle: String, count: Int?) -> NSView {

@@ -32,7 +32,8 @@ enum SelfTest {
 
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try Data("token = ghp_abcdefghijklmnopqrstuvwxyz1234567890".utf8)
+            let fakeToken = "ghp_" + String(repeating: "a", count: 32)
+            try Data("token = \(fakeToken)".utf8)
                 .write(to: directory.appendingPathComponent("secret.txt"))
             return try !SecretScanner.scan(repositoryURL: directory).isEmpty
         } catch {
