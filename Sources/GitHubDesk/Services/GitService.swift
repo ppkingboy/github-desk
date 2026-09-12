@@ -54,7 +54,7 @@ enum GitService {
             workingDirectory: workingDirectory
         )
 
-        if existingRemote == nil {
+        if existingRemote?.succeeded != true {
             try runGit(["remote", "add", "origin", remoteURL], workingDirectory: workingDirectory)
         } else {
             try runGit(["remote", "set-url", "origin", remoteURL], workingDirectory: workingDirectory)

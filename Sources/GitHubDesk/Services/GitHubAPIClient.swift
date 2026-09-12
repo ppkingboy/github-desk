@@ -60,6 +60,18 @@ struct GitHubAPIClient {
         return try await request(path: "/user/repos", method: "POST", body: body)
     }
 
+    func repository(fullName: String) async throws -> GitHubRepository? {
+        do {
+            return try await request(
+                path: "/repos/\(fullName)",
+                method: "GET",
+                body: Optional<EmptyBody>.none
+            )
+        } catch GitHubAPIError.requestFailed(let statusCode, _) where statusCode == 404 {
+            return nil
+        }
+    }
+
     func updateVisibility(repositorySlug: String, isPrivate: Bool) async throws {
         let body = UpdateRepositoryBody(
             description: nil,

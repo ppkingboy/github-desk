@@ -304,12 +304,18 @@ final class AppStore: ObservableObject {
                     repository: request.repository,
                     credential: credential
                 )
-                let repository = try await GitHubAPIClient(accessToken: credential.accessToken)
-                    .createRepository(
+                let client = GitHubAPIClient(accessToken: credential.accessToken)
+                let fullName = "\(account.login)/\(sanitizedName)"
+                let repository: GitHubRepository
+                if let existing = try await client.repository(fullName: fullName) {
+                    repository = existing
+                } else {
+                    repository = try await client.createRepository(
                         name: sanitizedName,
                         description: request.description,
                         isPrivate: request.visibility == .privateRepository
                     )
+                }
 
                 try await Task.detached(priority: .userInitiated) {
                     try GitService.attachRemoteAndPush(
